@@ -1,0 +1,5 @@
+FROM debian:stretch
+MAINTAINER Daniel Schneller <daniel.schneller@centerdevice.com>
+RUN apt-get update
+RUN apt-get install -y python2.7-minimal python2.7-dev python-virtualenv gcc make libffi-dev libssl-dev
+

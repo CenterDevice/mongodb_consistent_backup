@@ -87,8 +87,11 @@ bin/mongodb-consistent-backup.debian8.$(ARCH):
 
 debian8: bin/mongodb-consistent-backup.debian8.$(ARCH)
 
+mcdebian9-image:
+	docker build -f Dockerfile-debian9 --tag mcbdebian9:latest .
+
 # Build Debian9 Binary (in Docker - .deb package soon!)
-bin/mongodb-consistent-backup.debian9.$(ARCH):
+bin/mongodb-consistent-backup.debian9.$(ARCH): mcdebian9-image
 	docker run --rm \
 		-v "$(MAKE_DIR)/bin:/src/bin:Z" \
 		-v "$(MAKE_DIR)/conf:/src/conf:Z" \
@@ -101,8 +104,8 @@ bin/mongodb-consistent-backup.debian9.$(ARCH):
 		-v "$(MAKE_DIR)/README.rst:/src/README.rst:Z" \
 		-v "$(MAKE_DIR)/LICENSE:/src/LICENSE:Z" \
 		-v "$(MAKE_DIR)/VERSION:/src/VERSION:Z" \
-		-i debian:stretch \
-		/bin/bash -c "apt-get update && apt-get install -y python2.7-minimal python2.7-dev python-virtualenv gcc make libffi-dev libssl-dev && \
+		-i mcbdebian9:latest \
+		/bin/bash -c " \
 			make -C /src RELEASE=$(RELEASE) GIT_COMMIT=$(GIT_COMMIT) BIN_NAME=mongodb-consistent-backup.debian9.$(ARCH).tmp && \
 			mv -vf /src/bin/mongodb-consistent-backup.debian9.$(ARCH).tmp /src/bin/mongodb-consistent-backup.debian9.$(ARCH) && \
 			/src/bin/mongodb-consistent-backup.debian9.$(ARCH) --version"
