@@ -54,6 +54,7 @@ class S3UploadThread:
             progress_key_name = "%s %d/%d" % (self.short_key_name(self.key_name), self.multipart_num, self.multipart_parts)
         self._progress    = S3ProgressBar(progress_key_name, max=float(self.byte_count / 1024.00 / 1024.00))
         self._last_bytes  = None
+        self._last_status_ts = None
 
         try:
             self.s3_conn = S3Session(self.region, self.access_key, self.secret_key, self.bucket_name, self.secure, self.retries)
@@ -83,11 +84,33 @@ class S3UploadThread:
         if update_bytes > 0:
             self._progress.next(float(update_bytes / 1024.00 / 1024.00))
         self._last_bytes = bytes_uploaded
+        self.throttle(update_bytes)
+
+    def throttle(self, update_bytes):
+        if self._last_status_ts:
+            current_ts = float(time())
+            duration = current_ts - self._last_status_ts
+            logging.debug("Transferred %d bytes in %.2f seconds" % (update_bytes, duration))
+            actual_bytes_per_second = float(update_bytes / duration)
+            target_bytes_per_second = self.target_bandwidth
+            logging.debug("Actual speed is %.2f bytes/s vs target speed %.0f bytes/s." % (
+                actual_bytes_per_second, target_bytes_per_second))
+            bps_factor = actual_bytes_per_second / target_bytes_per_second
+            if bps_factor > 1.0:
+                logging.debug("This is %.2f times too fast" % bps_factor)
+                throttle_secs_computed = float(duration * bps_factor)
+                throttle_secs_ceiling = 3
+                throttle_secs = min(throttle_secs_computed, throttle_secs_ceiling)
+                logging.debug("Sleeping for %.2fs (but %.2fs at most), trying to approximate target bandwidth." % (
+                    throttle_secs_computed, throttle_secs_ceiling))
+                sleep(throttle_secs)
+        self._last_status_ts = float(time())
 
     def run(self):
         try:
             tries     = 0
             exception = None
+            callback_every_x_bytes = 2.5 * 1024.0 * 1024.0
             while tries < self.retries:
                 if self.do_stop:
                     break
@@ -102,26 +125,10 @@ class S3UploadThread:
                                     self.multipart_parts,
                                     float(self.byte_count / 1024.00 / 1024.00)
                                 ))
-                                start_ts = float(time())
+                                # approximate a callback every x bytes to allow for somewhat decent throttling
+                                callback_count = self.byte_count / callback_every_x_bytes
                                 with FileChunkIO(self.file_name, 'r', offset=self.multipart_offset, bytes=self.byte_count) as fp:
-                                    mp.upload_part_from_file(fp=fp, cb=self.status, num_cb=10, part_num=self.multipart_num)
-                                end_ts = float(time())
-                                duration = end_ts - start_ts
-                                logging.debug("************** part transfer too %.2f seconds for %d bytes" % (duration, self.byte_count))
-                                actual_bytes_per_second = float(self.byte_count / duration)
-                                target_bytes_per_second = self.target_bandwidth
-                                logging.debug("************** actual speed %.2f bytes/second vs target speed %.2f" % (actual_bytes_per_second, target_bytes_per_second))
-                                bps_factor = actual_bytes_per_second / target_bytes_per_second
-                                logging.debug("************** This is %.2f times too fast" % bps_factor)
-                                if bps_factor > 1.0:
-                                    needed_secs = float(duration * bps_factor)
-                                    max_sleep = 10.0
-                                    throttle_secs = min(needed_secs, max_sleep)
-                                    logging.debug("************** Need to sleep for %.2fs, but %.2fs max => %.2fs" % (needed_secs, max_sleep, throttle_secs))
-                                    logging.info("Sleeping %.2fs, trying to approximate target bandwidth" % throttle_secs)
-                                    sleep(throttle_secs)
-                                    logging.debug("Slept %.2fs, trying to approximate target bandwidth" % throttle_secs)
-
+                                    mp.upload_part_from_file(fp=fp, cb=self.status, num_cb=callback_count, part_num=self.multipart_num)
                             break
                     else:
                         key = None
@@ -131,7 +138,9 @@ class S3UploadThread:
                                 float(self.byte_count / 1024.00 / 1024.00)
                             ))
                             key = Key(bucket=self.bucket, name=self.key_name)
-                            key.set_contents_from_filename(self.file_name, cb=self.status, num_cb=10)
+                            # approximate a callback every x bytes to allow for somewhat decent throttling
+                            callback_count = self.byte_count / callback_every_x_bytes
+                            key.set_contents_from_filename(self.file_name, cb=self.status, num_cb=callback_count)
                         finally:
                             if key:
                                 key.close()
