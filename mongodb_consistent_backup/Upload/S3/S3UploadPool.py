@@ -28,15 +28,16 @@ pickle(MethodType, _reduce_method)
 
 
 class S3UploadPool():
-    def __init__(self, bucket_name, region, access_key, secret_key, threads=4, remove_uploaded=False, chunk_bytes=50 * 1024 * 1024, key_acl=None):
-        self.bucket_name     = bucket_name
-        self.region          = region
-        self.access_key      = access_key
-        self.secret_key      = secret_key
-        self.threads         = threads
-        self.remove_uploaded = remove_uploaded
-        self.chunk_bytes     = chunk_bytes
-        self.key_acl         = key_acl
+    def __init__(self, bucket_name, region, access_key, secret_key, threads=4, remove_uploaded=False, chunk_bytes=50 * 1024 * 1024, key_acl=None, **kwargs):
+        self.bucket_name       = bucket_name
+        self.region            = region
+        self.access_key        = access_key
+        self.secret_key        = secret_key
+        self.threads           = threads
+        self.remove_uploaded   = remove_uploaded
+        self.chunk_bytes       = chunk_bytes
+        self.key_acl           = key_acl
+        self.upload_file_regex = kwargs.get("upload_file_regex")
 
         self.multipart_min_bytes = 5242880
 

@@ -23,6 +23,10 @@ class S3(Task):
         self.chunk_size          = self.chunk_size_mb * 1024 * 1024
         self.s3_acl              = self.config.upload.s3.acl
         self.key_prefix          = base_dir
+        if self.config.upload.file_regex == "none":
+            self.upload_file_regex = None
+        else:
+            self.upload_file_regex = self.config.upload.file_regex
 
         self.threads(self.config.upload.threads)
         self._pool = None
@@ -63,7 +67,7 @@ class S3(Task):
                 self.chunk_size_mb,
                 self.retries
             ))
-            for file_path in get_upload_files(self.backup_dir):
+            for file_path in get_upload_files(self.backup_dir, self.upload_file_regex):
                 key_name = self.get_key_name(file_path)
                 self._pool.upload(file_path, key_name)
             self._pool.wait()
