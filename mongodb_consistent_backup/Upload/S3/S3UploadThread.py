@@ -7,6 +7,7 @@ from boto.s3.key import Key
 from filechunkio import FileChunkIO
 from progress.bar import Bar
 from time import sleep
+from time import time
 
 from S3Session import S3Session
 
@@ -28,7 +29,7 @@ class S3ProgressBar(Bar):
 
 
 class S3UploadThread:
-    def __init__(self, bucket_name, region, access_key, secret_key, file_name, key_name, byte_count, multipart_id=None,
+    def __init__(self, bucket_name, region, access_key, secret_key, file_name, key_name, byte_count, target_bandwidth, multipart_id=None,
                  multipart_num=None, multipart_parts=None, multipart_offset=None, retries=5, secure=True, retry_sleep_secs=1):
         self.bucket_name      = bucket_name
         self.region           = region
@@ -37,6 +38,7 @@ class S3UploadThread:
         self.file_name        = file_name
         self.key_name         = key_name
         self.byte_count       = byte_count
+        self.target_bandwidth = target_bandwidth
         self.multipart_id     = multipart_id
         self.multipart_num    = multipart_num
         self.multipart_parts  = multipart_parts
@@ -46,6 +48,7 @@ class S3UploadThread:
         self.retry_sleep_secs = retry_sleep_secs
         self.do_stop          = False
 
+        logging.warning("************************** S3UploadThread : %.2f" % self.target_bandwidth)
         progress_key_name = self.short_key_name(self.key_name)
         if self.multipart_num and self.multipart_parts:
             progress_key_name = "%s %d/%d" % (self.short_key_name(self.key_name), self.multipart_num, self.multipart_parts)
@@ -99,9 +102,27 @@ class S3UploadThread:
                                     self.multipart_parts,
                                     float(self.byte_count / 1024.00 / 1024.00)
                                 ))
+                                start_ts = float(time())
                                 with FileChunkIO(self.file_name, 'r', offset=self.multipart_offset, bytes=self.byte_count) as fp:
                                     mp.upload_part_from_file(fp=fp, cb=self.status, num_cb=10, part_num=self.multipart_num)
-                                break
+                                end_ts = float(time())
+                                duration = end_ts - start_ts
+                                logging.debug("************** part transfer too %.2f seconds for %d bytes" % (duration, self.byte_count))
+                                actual_bytes_per_second = float(self.byte_count / duration)
+                                target_bytes_per_second = self.target_bandwidth
+                                logging.debug("************** actual speed %.2f bytes/second vs target speed %.2f" % (actual_bytes_per_second, target_bytes_per_second))
+                                bps_factor = actual_bytes_per_second / target_bytes_per_second
+                                logging.debug("************** This is %.2f times too fast" % bps_factor)
+                                if bps_factor > 1.0:
+                                    needed_secs = float(duration * bps_factor)
+                                    max_sleep = 10.0
+                                    throttle_secs = min(needed_secs, max_sleep)
+                                    logging.debug("************** Need to sleep for %.2fs, but %.2fs max => %.2fs" % (needed_secs, max_sleep, throttle_secs))
+                                    logging.info("Sleeping %.2fs, trying to approximate target bandwidth" % throttle_secs)
+                                    sleep(throttle_secs)
+                                    logging.debug("Slept %.2fs, trying to approximate target bandwidth" % throttle_secs)
+
+                            break
                     else:
                         key = None
                         try:
